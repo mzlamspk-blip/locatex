@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>LOCATEX - Visitor Information</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="login">
+    <h1>LOCATEX</h1>
+    <h2>Location Analytics Link</h2>
+    <p>
+        By continuing, you understand that this page records
+        the visit time, approximate IP-based location,
+        device type and browser information.
+    </p>
+    <p>Exact GPS location is not collected.</p>
+    <button onclick="recordVisit()">Continue</button>
+    <p id="result"></p>
+</div>
+<script>
+async function recordVisit() {
+    const result = document.getElementById("result");
+    result.textContent = "Recording visit...";
+    const token =
+        document.querySelector('meta[name="csrf-token"]').content;
+    try {
+        const response = await fetch(
+            window.location.pathname.replace(
+                "/share/", "/record/"
+            ),
+            {
+                method: "POST",
+                headers: { "X-CSRF-Token": token }
+            }
+        );
+        if (!response.ok) {
+            throw new Error("Unable to record visit.");
+        }
+        result.textContent =
+            "Thank you! Your visit has been recorded.";
+    } catch (error) {
+        result.textContent =
+            "Something went wrong. Please try again.";
+    }
+}
+</script>
+</body>
+</html>

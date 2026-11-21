@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LOCATEX Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% if login_mode %}
+<div class="login">
+    <h1>LOCATEX</h1>
+    <p>Admin Login</p>
+    <form method="POST" action="/login">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="password" name="password"
+               placeholder="Admin Password" required autofocus>
+        <button type="submit">Login</button>
+    </form>
+    {% for message in get_flashed_messages() %}
+        <p class="msg">{{ message }}</p>
+    {% endfor %}
+</div>
+{% else %}
+<header>
+    <div>
+        <h1>LOCATEX</h1>
+        <p>Smart Location Analytics Dashboard</p>
+    </div>
+    <a href="/logout">Logout</a>
+</header>
+<main>
+    <div class="card">
+        <h3>Total Link Visits</h3>
+        <h1>{{ total }}</h1>
+    </div>
+
+    <section class="panel">
+        <h2>Create Location Analytics Link</h2>
+        <form method="POST" action="/create">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">+ Generate New Link</button>
+        </form>
+    </section>
+
+    <section class="panel">
+        <h2>Your Generated Links</h2>
+        {% if links %}
+        <table>
+            <tr><th>Link</th><th>Created</th><th>Visits</th></tr>
+            {% for link in links %}
+            <tr>
+                <td>
+                    <input readonly class="link-input"
+                    value="{{ host }}share/{{ link['token'] }}"
+                    onclick="this.select()">
+                </td>
+                <td>{{ link['created_at'] }}</td>
+                <td>{{ link['total_visits'] }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="empty">No links yet — generate your first one above.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel">
+        <h2>Visitor Analytics</h2>
+        <p>Approximate IP-based location. Not GPS.</p>
+        {% if visits %}
+        <table>
+            <tr>
+                <th>Date / Time</th><th>Link</th><th>City</th><th>Country</th>
+                <th>Device</th><th>Browser</th><th>Map</th>
+            </tr>
+            {% for visit in visits %}
+            <tr>
+                <td>{{ visit['visited_at'] }}</td>
+                <td><code>{{ visit['token'][:8] }}&hellip;</code></td>
+                <td>{{ visit['city'] }}</td>
+                <td>{{ visit['country'] }}</td>
+                <td>{{ visit['device'] }}</td>
+                <td>{{ visit['browser'] }}</td>
+                <td>
+                    {% if visit['latitude'] is not none
+                          and visit['longitude'] is not none %}
+                    <a target="_blank" rel="noopener"
+                    href="https://www.openstreetmap.org/?mlat={{ visit['latitude'] }}&mlon={{ visit['longitude'] }}#map=12/{{ visit['latitude'] }}/{{ visit['longitude'] }}">
+                        View Map
+                    </a>
+                    {% else %}
+                        Unavailable
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="empty">No visits recorded yet.</p>
+        {% endif %}
+    </section>
+</main>
+{% endif %}
+</body>
+</html>

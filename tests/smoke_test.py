@@ -66,14 +66,47 @@ def main() -> None:
     print(f"[+] share link: {BASE}/share/{share_token}")
 
     # 5. visitor opens the link, sees the notice, clicks Continue
+    #    and allows GPS in the browser prompt
     visitor = requests.Session()
     r = visitor.get(f"{BASE}/share/{share_token}")
     assert r.status_code == 200 and "Continue" in r.text, "visitor page broken"
     vtoken = re.search(r'name="csrf-token"\s+content="([^"]+)"', r.text).group(1)
-    r = visitor.post(f"{BASE}/record/{share_token}",
-                     headers={"X-CSRF-Token": vtoken})
+    r = visitor.post(
+        f"{BASE}/record/{share_token}",
+        headers={"X-CSRF-Token": vtoken, "Content-Type": "application/json"},
+        json={"latitude": 28.6139, "longitude": 77.2090, "accuracy": 12.5},
+    )
     assert r.status_code == 200 and r.json().get("success") is True, r.text
-    print("[+] visit recorded")
+    visit_id = r.json().get("visit_id")
+    assert visit_id, "visit_id missing from record response"
+    print("[+] visit recorded with GPS")
+
+    # 5b. live tracking update while the page stays open
+    r = visitor.post(
+        f"{BASE}/locate/{share_token}",
+        headers={"X-CSRF-Token": vtoken, "Content-Type": "application/json"},
+        json={"visit_id": visit_id,
+              "latitude": 28.6141, "longitude": 77.2093, "accuracy": 8.0},
+    )
+    assert r.status_code == 200 and r.json().get("success") is True, r.text
+    print("[+] live location update accepted")
+
+    # 5c. updates for an unknown visit must be rejected
+    r = visitor.post(
+        f"{BASE}/locate/{share_token}",
+        headers={"X-CSRF-Token": vtoken, "Content-Type": "application/json"},
+        json={"visit_id": "000000000000000000000000",
+              "latitude": 1.0, "longitude": 1.0},
+    )
+    assert r.status_code == 404, "unknown visit_id was accepted"
+
+    # 5d. out-of-range coordinates are rejected
+    r = visitor.post(
+        f"{BASE}/locate/{share_token}",
+        headers={"X-CSRF-Token": vtoken, "Content-Type": "application/json"},
+        json={"visit_id": visit_id, "latitude": 999, "longitude": 0},
+    )
+    assert r.status_code == 400, "invalid coordinates were accepted"
 
     # 6. record without a CSRF token must be rejected
     r = requests.post(f"{BASE}/record/{share_token}")
@@ -82,11 +115,13 @@ def main() -> None:
     # 7. unknown links 404
     assert requests.get(f"{BASE}/share/deadbeef" * 4).status_code == 404
 
-    # 8. dashboard shows the visit for this link
+    # 8. dashboard shows the visit for this link, with GPS + map
     page = admin.get(f"{BASE}/").text
     assert share_token[:8] in page, "visit row missing on dashboard"
     assert "<h1>1</h1>" in page, "visit counter did not increment"
-    print("[+] dashboard shows the visit")
+    assert "Live Location Map" in page, "map section missing"
+    assert "&plusmn;8 m" in page, "GPS accuracy value missing"
+    print("[+] dashboard shows the visit, accuracy and map")
 
     print("ALL SMOKE TESTS PASSED")
 

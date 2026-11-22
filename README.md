@@ -10,8 +10,14 @@ When a recipient opens a link they first see a privacy notice and must click **C
 
 - Generate a unique link for each sharing session
 - Record visits only after the visitor consents (Continue button)
-- Show timestamp, approximate location, device and browser
-- Count visits per link, with a map link when coordinates are available
+- **Exact GPS location** — the browser's own permission prompt decides; a visit
+  is recorded only after the visitor clicks Continue *and* allows location
+- **Live tracking while the page stays open** — automatic position refreshes,
+  with a visible "Location sharing: ON" indicator and a **Stop sharing**
+  button the visitor controls
+- **Live map** (OpenStreetMap/Leaflet) on the dashboard, auto-refreshing every 30 s
+- Show timestamp, location, GPS accuracy, device and browser
+- Count visits per link
 - **MongoDB Atlas** storage in production, **SQLite** fallback for local dev
 - CSRF protection, rate limiting, secure session cookies, security headers
 
@@ -94,6 +100,20 @@ vercel --prod
 3. Network Access → allow access from `0.0.0.0/0` (Vercel functions are dynamic)
 4. Connect → Drivers → copy the connection string, fill in the password
 5. Set it as `MONGODB_URI` on Vercel
+
+## How the location flow works (consent first)
+
+1. Visitor opens `/share/<token>` and reads the disclosure notice.
+2. They click **Continue** — *only now* does anything get recorded.
+3. The browser shows its own **"Share your location?"** prompt; the visitor
+   must press **Allow** for exact GPS. If they deny, only the approximate
+   IP-based location is stored.
+4. While the page stays open, position updates are sent automatically. The
+   visitor always sees a yellow **"Location sharing: ON"** status and can
+   press **Stop sharing** (or just close the page) at any moment.
+
+No location is collected before the visitor consents, and the browser
+permission prompt is never hidden or bypassed.
 
 ## Limitations & security notes
 

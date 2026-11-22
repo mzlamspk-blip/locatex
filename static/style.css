@@ -80,6 +80,34 @@ table input.link-input {
 .login h1 { color: #a78bfa; }
 .login h2 { color: #c4b5fd; font-size: 20px; }
 .login p { color: #cbd5e1; line-height: 1.5; }
+.login.wide { max-width: 560px; }
+.notice { color: #cbd5e1; line-height: 1.6; text-align: left; }
+.notice-list {
+    color: #cbd5e1;
+    line-height: 1.7;
+    text-align: left;
+    padding-left: 22px;
+}
+.notice-list strong { color: #c4b5fd; }
+#result { min-height: 1.4em; color: #a7f3d0; }
+.status {
+    color: #fbbf24;
+    font-weight: bold;
+    min-height: 1.4em;
+}
+button.stop {
+    background: #dc2626;
+    display: inline-block;
+    margin-top: 10px;
+}
+button.stop:hover { background: #b91c1c; }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+#map {
+    height: 400px;
+    width: 100%;
+    border-radius: 10px;
+    background: #0f172a;
+}
 .login input {
     width: 100%;
     margin: 15px 0;

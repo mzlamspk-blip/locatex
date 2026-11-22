@@ -53,6 +53,7 @@ MONGODB_URI = os.environ.get("MONGODB_URI", "")
 GEO_TIMEOUT = 5
 LOGIN_PER_MINUTE = 10
 RECORD_PER_MINUTE = 30
+LOCATE_PER_MINUTE = 60
 
 
 def now_iso() -> str:
@@ -151,11 +152,16 @@ class SqliteStore:
                     country TEXT,
                     latitude REAL,
                     longitude REAL,
+                    accuracy REAL,
                     device TEXT,
                     browser TEXT
                 )
                 """
             )
+            try:  # migrate databases created before the accuracy column
+                conn.execute("ALTER TABLE visits ADD COLUMN accuracy REAL")
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
         finally:
             conn.close()
@@ -202,15 +208,15 @@ class SqliteStore:
         finally:
             conn.close()
 
-    def add_visit(self, doc: dict) -> None:
+    def add_visit(self, doc: dict):
         conn = self._connect()
         try:
-            conn.execute(
+            cur = conn.execute(
                 """
                 INSERT INTO visits (
                     token, visited_at, city, region, country,
-                    latitude, longitude, device, browser
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    latitude, longitude, accuracy, device, browser
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     doc["token"],
@@ -220,11 +226,31 @@ class SqliteStore:
                     doc["country"],
                     doc["latitude"],
                     doc["longitude"],
+                    doc.get("accuracy"),
                     doc["device"],
                     doc["browser"],
                 ),
             )
             conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+
+    def update_visit_location(
+        self, token: str, visit_id, lat: float, lng: float, acc
+    ) -> bool:
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                """
+                UPDATE visits
+                SET latitude = ?, longitude = ?, accuracy = ?
+                WHERE id = ? AND token = ?
+                """,
+                (lat, lng, acc, visit_id, token),
+            )
+            conn.commit()
+            return cur.rowcount == 1
         finally:
             conn.close()
 
@@ -286,8 +312,24 @@ class MongoStore:
             )
         return out
 
-    def add_visit(self, doc: dict) -> None:
-        self.visits.insert_one(dict(doc))
+    def add_visit(self, doc: dict):
+        result = self.visits.insert_one(dict(doc))
+        return str(result.inserted_id)
+
+    def update_visit_location(
+        self, token: str, visit_id, lat: float, lng: float, acc
+    ) -> bool:
+        from bson.objectid import ObjectId
+
+        try:
+            oid = ObjectId(str(visit_id))
+        except Exception:
+            return False
+        result = self.visits.update_one(
+            {"_id": oid, "token": token},
+            {"$set": {"latitude": lat, "longitude": lng, "accuracy": acc}},
+        )
+        return result.matched_count == 1
 
     def recent_visits(self, limit: int = 100) -> list:
         return list(
@@ -344,6 +386,36 @@ def lookup_location(ip: str):
     return city, region, country, latitude, longitude
 
 
+def extract_coords(payload):
+    """Validate client-supplied GPS coordinates.
+
+    Returns (lat, lng, accuracy) or (None, None, None) when the payload has
+    no usable coordinates (the visit is then recorded with IP location only).
+    """
+    if not payload:
+        return None, None, None
+    try:
+        lat = float(payload.get("latitude"))
+        lng = float(payload.get("longitude"))
+        raw_acc = payload.get("accuracy")
+        acc = float(raw_acc) if raw_acc not in (None, "") else None
+    except (TypeError, ValueError):
+        return None, None, None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+        return None, None, None
+    if acc is not None and (acc < 0 or acc > 10_000_000):
+        acc = None
+    return lat, lng, acc
+
+
+def request_payload() -> dict:
+    """Accept both JSON and form submissions."""
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        return data
+    return request.form.to_dict()
+
+
 # -------------------------------------------------------------------- routes
 
 
@@ -387,11 +459,18 @@ def logout():
 @login_required
 def dashboard():
     store = get_store()
+    visits = store.recent_visits(100)
+    map_points = [
+        v
+        for v in visits
+        if v.get("latitude") is not None and v.get("longitude") is not None
+    ]
     return render_template(
         "dashboard.html",
         login_mode=False,
         links=store.list_links(),
-        visits=store.recent_visits(100),
+        visits=visits,
+        map_points=map_points,
         total=store.total_visits(),
         host=request.host_url,
     )
@@ -423,8 +502,12 @@ def record_visit(token):
     if not store.get_link(token):
         abort(404)
 
+    lat, lng, accuracy = extract_coords(request_payload())
+
     ip = client_ip()
-    city, region, country, latitude, longitude = lookup_location(ip)
+    city, region, country, ip_lat, ip_lng = lookup_location(ip)
+    if lat is None:  # consent given but GPS unavailable: fall back to IP
+        lat, lng = ip_lat, ip_lng
 
     agent = parse(request.headers.get("User-Agent", ""))
     if agent.is_mobile:
@@ -435,19 +518,41 @@ def record_visit(token):
         device = "Desktop"
     browser = agent.browser.family or "Unknown"
 
-    store.add_visit(
+    visit_id = store.add_visit(
         {
             "token": token,
             "visited_at": now_iso(),
             "city": city,
             "region": region,
             "country": country,
-            "latitude": latitude,
-            "longitude": longitude,
+            "latitude": lat,
+            "longitude": lng,
+            "accuracy": accuracy,
             "device": device,
             "browser": browser,
         }
     )
+    return {"success": True, "visit_id": visit_id}
+
+
+@app.route("/locate/<token>", methods=["POST"])
+def update_location(token):
+    """Receive GPS refreshes while the visitor keeps the page open."""
+    rate_limit("locate", LOCATE_PER_MINUTE)
+    if not csrf_ok():
+        return {"success": False, "error": "csrf"}, 400
+    store = get_store()
+    if not store.get_link(token):
+        abort(404)
+    payload = request_payload()
+    lat, lng, accuracy = extract_coords(payload)
+    if lat is None:
+        return {"success": False, "error": "coordinates required"}, 400
+    visit_id = payload.get("visit_id")
+    if visit_id in (None, ""):
+        return {"success": False, "error": "visit_id required"}, 400
+    if not store.update_visit_location(token, visit_id, lat, lng, accuracy):
+        return {"success": False, "error": "unknown visit"}, 404
     return {"success": True}
 
 

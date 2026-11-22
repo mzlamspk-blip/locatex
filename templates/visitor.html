@@ -8,43 +8,151 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-<div class="login">
+<div class="login wide">
     <h1>LOCATEX</h1>
-    <h2>Location Analytics Link</h2>
-    <p>
-        By continuing, you understand that this page records
-        the visit time, approximate IP-based location,
-        device type and browser information.
+    <h2>Location Sharing Request</h2>
+    <p class="notice">
+        By clicking <strong>Continue</strong> you agree that this page will
+        share with the sender:
     </p>
-    <p>Exact GPS location is not collected.</p>
-    <button onclick="recordVisit()">Continue</button>
+    <ul class="notice-list">
+        <li>Your <strong>exact GPS location</strong> (your browser will ask
+            for permission next)</li>
+        <li>Location <strong>updates while this page stays open</strong></li>
+        <li>Visit time, approximate IP-based location, device and browser</li>
+    </ul>
+    <p class="notice">
+        You can press <strong>Stop sharing</strong> at any time, or simply
+        close this page. Nothing is recorded before you click Continue.
+    </p>
+    <button id="continueBtn" onclick="recordVisit()">Continue</button>
+    <button id="stopBtn" class="stop" onclick="stopSharing()"
+            style="display:none">Stop sharing</button>
     <p id="result"></p>
+    <p id="status" class="status"></p>
 </div>
 <script>
-async function recordVisit() {
-    const result = document.getElementById("result");
-    result.textContent = "Recording visit...";
-    const token =
-        document.querySelector('meta[name="csrf-token"]').content;
-    try {
-        const response = await fetch(
-            window.location.pathname.replace(
-                "/share/", "/record/"
-            ),
-            {
-                method: "POST",
-                headers: { "X-CSRF-Token": token }
-            }
-        );
-        if (!response.ok) {
-            throw new Error("Unable to record visit.");
-        }
-        result.textContent =
-            "Thank you! Your visit has been recorded.";
-    } catch (error) {
-        result.textContent =
-            "Something went wrong. Please try again.";
+const csrf =
+    document.querySelector('meta[name="csrf-token"]').content;
+const recordPath = window.location.pathname.replace("/share/", "/record/");
+const locatePath = window.location.pathname.replace("/share/", "/locate/");
+const resultEl = document.getElementById("result");
+const statusEl = document.getElementById("status");
+const stopBtn = document.getElementById("stopBtn");
+let watchId = null;
+let visitId = null;
+let updates = 0;
+
+async function send(path, body) {
+    const response = await fetch(path, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrf
+        },
+        body: JSON.stringify(body || {})
+    });
+    if (!response.ok) {
+        throw new Error("request failed");
     }
+    return response.json();
+}
+
+function geoOptions() {
+    return {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 5000
+    };
+}
+
+async function recordVisit() {
+    document.getElementById("continueBtn").disabled = true;
+    resultEl.textContent = "Waiting for location permission...";
+    if (!("geolocation" in navigator)) {
+        await recordWithoutGps(
+            "Location is not supported by this browser.");
+        return;
+    }
+    navigator.geolocation.getCurrentPosition(
+        async function (position) {
+            try {
+                const data = await send(recordPath, {
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy
+                });
+                visitId = data.visit_id;
+                resultEl.textContent =
+                    "Thank you! Your visit has been recorded.";
+                startSharing();
+            } catch (error) {
+                fail();
+            }
+        },
+        async function () {
+            await recordWithoutGps(
+                "Location permission not granted - only an " +
+                "approximate IP-based location was recorded.");
+        },
+        geoOptions()
+    );
+}
+
+async function recordWithoutGps(message) {
+    try {
+        const data = await send(recordPath, {});
+        visitId = data.visit_id;
+        resultEl.textContent = message;
+        document.getElementById("continueBtn").style.display = "none";
+    } catch (error) {
+        fail();
+    }
+}
+
+function fail() {
+    resultEl.textContent =
+        "Something went wrong. Please try again.";
+    document.getElementById("continueBtn").disabled = false;
+}
+
+function startSharing() {
+    document.getElementById("continueBtn").style.display = "none";
+    stopBtn.style.display = "inline-block";
+    statusEl.textContent = "Location sharing: ON";
+    watchId = navigator.geolocation.watchPosition(
+        async function (position) {
+            updates += 1;
+            try {
+                await send(locatePath, {
+                    visit_id: visitId,
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy
+                });
+                statusEl.textContent =
+                    "Location sharing: ON - update #" + updates +
+                    ", accuracy +/-" +
+                    Math.round(position.coords.accuracy) + " m";
+            } catch (error) {
+                /* keep trying on the next update */
+            }
+        },
+        function () {
+            /* permission revoked or signal lost */
+        },
+        geoOptions()
+    );
+}
+
+function stopSharing() {
+    if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
+    stopBtn.style.display = "none";
+    statusEl.textContent = "Location sharing STOPPED. You can close this page.";
+    resultEl.textContent = "";
 }
 </script>
 </body>

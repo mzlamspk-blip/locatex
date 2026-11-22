@@ -18,7 +18,7 @@ import sqlite3
 import time
 import uuid
 from datetime import datetime, timezone
-from functools import lru_cache, wraps
+from functools import wraps
 
 import requests
 from flask import (
@@ -127,6 +127,12 @@ def rate_limit(name: str, limit: int, window: float = 60.0) -> None:
 
 class SqliteStore:
     """Local development backend (single SQLite file)."""
+
+    @property
+    def label(self) -> str:
+        if MONGODB_URI:
+            return "SQLite (temporary - MongoDB unavailable)"
+        return "SQLite (local, resets on redeploy)"
 
     def __init__(self, path: str):
         self.path = path
@@ -275,6 +281,8 @@ class SqliteStore:
 class MongoStore:
     """Production backend (MongoDB Atlas)."""
 
+    label = "MongoDB (persistent)"
+
     def __init__(self, uri: str):
         from pymongo import MongoClient
 
@@ -340,19 +348,40 @@ class MongoStore:
         return self.visits.count_documents({})
 
 
-@lru_cache(maxsize=1)
+_store_state = {"store": None, "retry_at": 0.0}
+MONGO_RETRY_SECONDS = 60  # after a failure, re-attempt MongoDB this often
+
+
 def get_store():
+    """Return the active storage backend.
+
+    Uses MongoDB Atlas when MONGODB_URI is set. If Atlas is unreachable
+    (e.g. its IP allowlist does not yet include the host's egress IPs) we
+    fall back to a temporary SQLite database so the site stays online, and
+    automatically retry MongoDB every MONGO_RETRY_SECONDS.
+    """
+    now = time.time()
+    store = _store_state["store"]
+    if store is not None and now < _store_state["retry_at"]:
+        return store
+
+    default_path = "/tmp/locatex.db" if IS_VERCEL else "locatex.db"
     if MONGODB_URI:
         try:
-            return MongoStore(MONGODB_URI)
-        except Exception as exc:  # pragma: no cover - surfaced in logs
-            print(f"[LOCATEX] MongoDB connection failed: {exc}")
-            raise
-    # On Vercel the project directory is not writable; use /tmp instead.
-    # NOTE: this SQLite file is ephemeral on Vercel (cleared on redeploy) -
-    # set MONGODB_URI for durable storage.
-    default_path = "/tmp/locatex.db" if IS_VERCEL else "locatex.db"
-    return SqliteStore(os.environ.get("SQLITE_PATH", default_path))
+            store = MongoStore(MONGODB_URI)
+            _store_state.update(store=store, retry_at=now + 3600)
+            return store
+        except Exception as exc:  # noqa: BLE001 - surfaced in logs
+            print(f"[LOCATEX] MongoDB unavailable ({exc}); using temporary SQLite")
+            store = SqliteStore(os.environ.get("SQLITE_PATH", default_path))
+            _store_state.update(
+                store=store, retry_at=now + MONGO_RETRY_SECONDS
+            )
+            return store
+
+    store = SqliteStore(os.environ.get("SQLITE_PATH", default_path))
+    _store_state.update(store=store, retry_at=now + 3600)
+    return store
 
 
 # ----------------------------------------------------------------- geolookup
@@ -473,7 +502,7 @@ def dashboard():
         map_points=map_points,
         total=store.total_visits(),
         host=request.host_url,
-        backend="MongoDB (persistent)" if MONGODB_URI else "SQLite (local, resets on redeploy)",
+        backend=store.label,
     )
 
 

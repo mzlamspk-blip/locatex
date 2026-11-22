@@ -68,8 +68,15 @@
 
     <section class="panel">
         <h2>Live Location Map</h2>
-        <p>Exact GPS positions shared by visitors (approximate IP positions excluded). Refreshes every 30 seconds.</p>
-        <div id="map"></div>
+        <p>Exact GPS positions shared by visitors (approximate IP positions excluded). Refreshes every 30 seconds. Switch map style with the buttons on the map.</p>
+        <div class="map-wrap">
+            <div id="map"></div>
+            <div class="map-switch">
+                <button data-layer="hybrid" class="active">Satellite</button>
+                <button data-layer="satellite">Aerial</button>
+                <button data-layer="street">Street</button>
+            </div>
+        </div>
         {% if map_points %}
         <p class="empty">{{ map_points|length }} point(s) on the map.</p>
         {% else %}
@@ -140,11 +147,61 @@
         points.length ? [points[0].lat, points[0].lng] : [20, 0],
         points.length ? 13 : 2
     );
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        maxZoom: 19,
-        subdomains: "abcd",
-        attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
-    }).addTo(map);
+
+    // Street style: CARTO dark (OSM data)
+    const streetLayer = L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+            maxZoom: 19,
+            subdomains: "abcd",
+            attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+        }
+    );
+
+    // GPS / satellite styles: Esri World Imagery with optional road + label overlays
+    function imageryLayer() {
+        return L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+                maxZoom: 19,
+                attribution: "Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics"
+            }
+        );
+    }
+    const roadLabelsLayer = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {
+            maxZoom: 19
+        }
+    );
+    const placeLabelsLayer = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+            maxZoom: 19
+        }
+    );
+
+    const mapLayers = {
+        street: streetLayer,
+        satellite: imageryLayer(),
+        hybrid: L.layerGroup([imageryLayer(), roadLabelsLayer, placeLabelsLayer])
+    };
+
+    let activeLayer = null;
+    function setMapLayer(name) {
+        if (activeLayer) {
+            map.removeLayer(activeLayer);
+        }
+        activeLayer = mapLayers[name] || mapLayers.hybrid;
+        activeLayer.addTo(map);
+        document.querySelectorAll(".map-switch button").forEach(function (btn) {
+            btn.classList.toggle("active", btn.dataset.layer === name);
+        });
+    }
+
+    document.querySelectorAll(".map-switch button").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            setMapLayer(btn.dataset.layer);
+        });
+    });
+
+    setMapLayer("hybrid");  // default: satellite + roads + labels (GPS style)
 
     points.forEach(function (point) {
         L.marker([point.lat, point.lng]).addTo(map)

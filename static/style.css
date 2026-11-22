@@ -108,6 +108,37 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
     border-radius: 10px;
     background: #0f172a;
 }
+.map-wrap {
+    position: relative;
+}
+.map-switch {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+    display: flex;
+    gap: 4px;
+    background: rgba(15, 23, 42, 0.92);
+    padding: 5px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.map-switch button {
+    background: transparent;
+    color: #cbd5e1;
+    padding: 7px 13px;
+    font-size: 12px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: bold;
+}
+.map-switch button:hover { background: #334155; }
+.map-switch button.active {
+    background: #7c3aed;
+    color: #ffffff;
+}
 .login input {
     width: 100%;
     margin: 15px 0;

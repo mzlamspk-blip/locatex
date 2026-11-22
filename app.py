@@ -473,6 +473,7 @@ def dashboard():
         map_points=map_points,
         total=store.total_visits(),
         host=request.host_url,
+        backend="MongoDB (persistent)" if MONGODB_URI else "SQLite (local, resets on redeploy)",
     )
 
 

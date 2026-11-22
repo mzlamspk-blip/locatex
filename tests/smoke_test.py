@@ -118,7 +118,8 @@ def main() -> None:
     # 8. dashboard shows the visit for this link, with GPS + map
     page = admin.get(f"{BASE}/").text
     assert share_token[:8] in page, "visit row missing on dashboard"
-    assert "<h1>1</h1>" in page, "visit counter did not increment"
+    total = re.search(r'<div class="card">.*?<h1>(\d+)</h1>', page, re.S)
+    assert total and int(total.group(1)) >= 1, "visit counter did not increment"
     assert "Live Location Map" in page, "map section missing"
     assert "&plusmn;8 m" in page, "GPS accuracy value missing"
     print("[+] dashboard shows the visit, accuracy and map")

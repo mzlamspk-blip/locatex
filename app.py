@@ -306,7 +306,11 @@ def get_store():
         except Exception as exc:  # pragma: no cover - surfaced in logs
             print(f"[LOCATEX] MongoDB connection failed: {exc}")
             raise
-    return SqliteStore(os.environ.get("SQLITE_PATH", "locatex.db"))
+    # On Vercel the project directory is not writable; use /tmp instead.
+    # NOTE: this SQLite file is ephemeral on Vercel (cleared on redeploy) -
+    # set MONGODB_URI for durable storage.
+    default_path = "/tmp/locatex.db" if IS_VERCEL else "locatex.db"
+    return SqliteStore(os.environ.get("SQLITE_PATH", default_path))
 
 
 # ----------------------------------------------------------------- geolookup

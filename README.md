@@ -64,6 +64,10 @@ Run the automated end-to-end test:
 
 Never commit these values. Locally use `$env:` in PowerShell; on Vercel add them under **Project → Settings → Environment Variables**.
 
+> **Without `MONGODB_URI`** the app falls back to SQLite. Locally that is a
+> `locatex.db` file next to `app.py`; on Vercel it is written to `/tmp` and
+> **is wiped on every redeploy/cold start** — set `MONGODB_URI` for durable data.
+
 ## Deploy to Vercel
 
 The app is zero-config for Vercel's Python runtime (`app.py` exposes `app`).

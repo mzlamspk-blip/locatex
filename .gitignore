@@ -5,3 +5,6 @@ __pycache__/
 .env
 .vercel/
 _pdf_guide.txt
+
+.vercel
+.env*
